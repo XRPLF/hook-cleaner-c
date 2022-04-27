@@ -426,32 +426,25 @@ int cleaner (
                 // count types
                 int type_count = 0;
                 int imports_use_hook_cbak_type = 0;
+                int section_size = 0;
                 for (int i = 0; i < out_import_count; ++i)
                 {
                     if (!used[func_type[i]])
                     {
                         type_count++;
                         used[func_type[i]] = 1;
+                        section_size += 3U + types[func_type[i]].rc + types[func_type[i]].pc;
                         if (func_type[i] == hook_cbak_type)
                         {
                             imports_use_hook_cbak_type = 1;
-                            hook_cbak_type = i;
+                            hook_cbak_type = type_count-1;
                         }
                     }
                 }
                 
-                // compute section size:
-                int section_size = 0;
-                for (int i = 0;i < out_import_count; i++)
-                {
-                    section_size += 
-                        4U +                    // 0x60, 0x01, rt, pc, */
-                        types[func_type[i]].pc; // p, p, p, ... 
-                }
-
                 if (!imports_use_hook_cbak_type)
                 {
-                    type_count++;
+                    hook_cbak_type = type_count++;
                     section_size += 5U;
                 }
                 
@@ -461,18 +454,27 @@ int cleaner (
                 // account for the type vector size bytes
                 section_size += (type_count > 127 ? 2U : 1U);
 
+                if (DEBUG)
+                    printf("type section_size: %d\n", section_size);
                 // write out section size
                 leb_out(section_size, &o);
+
+
+                uint8_t* out_start = o;
 
                 // write type vector len
                 leb_out(type_count, &o);
 
                 // write out types
+                memset(used, 0, MAX_TYPES);
                 for (int i = 0; i < out_import_count; ++i)
                 {
                     int t = func_type[i];
                     if (!types[t].set)
                         return fprintf(stderr, "Tried to write unset type %d from func %d\n", func_type[i], i);
+                    if (used[t])
+                        continue;
+                    used[t] = 1;
 
                     *o++ = 0x60U;   // functype lead in byte
                     // write parameter count
@@ -480,10 +482,11 @@ int cleaner (
                     // write each parameter type
                     for (int j = 0; j < types[t].pc; ++j)
                         leb_out(types[t].p[j], &o);
-                    *o++ = 0x01U;   // all allowed types have one return type
-                    if (types[t].rc != 1)
-                        return fprintf(stderr, "Illegal type has %hhn return types on import %d\n", types[t].r, i);
-                    *o++ = types[t].r[0];  // return type
+                
+                    leb_out(types[t].rc, &o);
+                    for (int j = 0; j < types[t].rc; ++j)
+                        leb_out(types[t].r[j], &o);
+
                     // done for this record
                 }
 
@@ -495,9 +498,10 @@ int cleaner (
                     *o++ = 0x7FU;
                     *o++ = 0x01U;
                     *o++ = 0x7EU;
-                    hook_cbak_type = out_import_count;
                 }
 
+                if (DEBUG)
+                    printf("actual len: %d\n", o - out_start);
                 continue;
             }
 
