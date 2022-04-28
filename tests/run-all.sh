@@ -1,8 +1,7 @@
 stat ../cleaner > /dev/null 2> /dev/null
 if [ ! "$?" -eq "0" ];
 then
-    pushd
-    cd ..
+    pushd ..
     make
     popd
     stat ../cleaner > /dev/null 2> /dev/null
