@@ -505,7 +505,7 @@ int cleaner (
                 }
 
                 if (DEBUG)
-                    printf("actual len: %d\n", o - out_start);
+                    printf("Actual len: %ld\n", o - out_start);
                 continue;
             }
 
