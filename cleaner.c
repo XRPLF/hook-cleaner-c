@@ -379,6 +379,9 @@ int cleaner (
     for (int i = 0; i < 8; ++i)
         *o++ = *w++;
 
+    int type_new[MAX_TYPES];
+    memset(type_new, 0, sizeof(type_new));
+
     while (w < wend)
     {
         REQUIRE(1);
@@ -471,11 +474,14 @@ int cleaner (
 
                 // write out types
                 memset(used, 0, MAX_TYPES);
+                int upto = 0;
                 for (int i = 0; i < out_import_count; ++i)
                 {
                     int t = func_type[i];
                     if (!types[t].set)
                         return fprintf(stderr, "Tried to write unset type %d from func %d\n", func_type[i], i);
+                    
+
                     if (used[t])
                         continue;
                     used[t] = 1;
@@ -491,6 +497,7 @@ int cleaner (
                     for (int j = 0; j < types[t].rc; ++j)
                         leb_out(types[t].r[j], &o);
 
+                    type_new[t] = upto++;
                     // done for this record
                 }
 
@@ -511,42 +518,56 @@ int cleaner (
 
             case 0x02U: // imports
             {
-                *o++ = 0x02U;
-
+                *o++ = 0x02U;    
                 leb_out(out_import_size, &o);
                 leb_out(out_import_count, &o);
 
-                // only copy function imports
+                int type_count = 0;
+                
                 int count = LEB();
-
                 for (int i = 0; i < count; ++i)
                 {
-                    uint8_t* import_start = w;
-
                     // module name
                     int mod_length = LEB();
                     REQUIRE(mod_length);
+                    uint8_t* mod = w;
                     ADVANCE(mod_length);
 
                     // import name
                     int name_length = LEB();
                     REQUIRE(name_length);
+                    uint8_t* name = w;
                     ADVANCE(name_length);
 
-                    REQUIRE(1);
-                    uint8_t import_type = w[0];
+                    // only function imports
+                    if (*w != 0x00U)
+                        continue;
+
                     ADVANCE(1);
 
-                    uint64_t import_idx = LEB();
+                    // write mod 
+                    leb_out(mod_length, &o);
+                    memcpy(o, mod, mod_length);
+                    o += mod_length;
 
-                    if (import_type == 0x00)
-                    {
-                        int import_len = w-import_start;
-                        memcpy(o, import_start, import_len);
-                        o += import_len;
-                    }
-                    continue;
+                    // write name
+                    leb_out(name_length, &o);
+                    memcpy(o, name, name_length);
+                    o += name_length;
+
+                    // write import type (always 0)
+                    *o++ = 0x00U;
+
+                    if (DEBUG)
+                        printf("New import: %d old type: %d new type: %d\n", i, func_type[i], type_new[func_type[i]]);
+
+                    // write new type idx
+                    leb_out(type_new[func_type[i]], &o);
+
+                    LEB(); // discard old type
+                    // advance to next entry
                 }
+
                 continue;
             }
 
