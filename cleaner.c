@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 #define VERSION "1.0"
-#define DEBUG 0
+#define DEBUG 1
 #define DEBUG_VERBOSE 0
 
 #define MAX_TYPES 256
@@ -286,7 +286,9 @@ int cleaner (
         
 
             case 0x07U: // exports
-            { 
+            {
+                uint8_t* export_end = w + section_len; 
+    
                 uint64_t export_count = LEB();
             
                 for (uint64_t i = 0; i < export_count; ++i)
@@ -329,6 +331,8 @@ int cleaner (
                 // hook() is required at minimum
                 if (func_hook < 0)
                     return fprintf(stderr, "Could not find hook() export in wasm input\n");
+
+                w = export_end;
 
                 continue;
             }
