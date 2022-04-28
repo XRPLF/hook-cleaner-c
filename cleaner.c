@@ -224,7 +224,7 @@ int cleaner (
                 // just get an import count
                 int count = LEB();
                 if (DEBUG)
-                    printf("Import count: %d\n", out_import_count);
+                    printf("Import count: %d\n", count);
 
                 int func_upto = 0;
 
