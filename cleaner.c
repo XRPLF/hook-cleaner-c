@@ -734,7 +734,7 @@ int run(char* fnin, char* fnout)
     close(fin);
 
     // open output file
-    int fout = open(fnout, O_TRUNC | O_CREAT | O_WRONLY);
+    int fout = open(fnout, O_TRUNC | O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
     if (fout < 0)
         return fprintf(stderr, "Could not open file `%s` for writing\n", fnout);
 
