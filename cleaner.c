@@ -19,9 +19,9 @@ uint64_t leb(
     uint64_t val = 0, shift = 0, i = 0;
     while (*buf + i < bufend)
     {
-        int b = (int)((*buf)[i]);
+        uint64_t b = (uint64_t)((*buf)[i]);
         uint64_t last = val;
-        val += (b & 0x7F) << shift;
+        val += (b & 0x7FU) << shift;
         if (val < last)
         {
             fprintf(stderr, "LEB128 overflow in input wasm at offset %ld.\n",
@@ -29,7 +29,7 @@ uint64_t leb(
             exit(100);
         }
         ++i;
-        if (b & 0x80)
+        if (b & 0x80U)
         {
             shift += 7;
             continue;
