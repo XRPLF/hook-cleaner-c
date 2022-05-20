@@ -489,10 +489,12 @@ int cleaner (
                         type_count++;
                         used[func_type[i]] = 1;
                         section_size += 3U + types[func_type[i]].rc + types[func_type[i]].pc;
-                        if (func_type[i] == hook_cbak_type)
+                        if (func_type[i] == hook_cbak_type && !imports_use_hook_cbak_type)
                         {
                             imports_use_hook_cbak_type = 1;
                             hook_cbak_type = type_count-1;
+                            if (DEBUG)
+                                printf("Imports DO use hook_cbak_type = %d\n", hook_cbak_type);
                         }
                     }
                 }
@@ -501,6 +503,8 @@ int cleaner (
                 {
                     hook_cbak_type = type_count++;
                     section_size += 5U;
+                    if (DEBUG)
+                        printf("Imports do not use hook_cbak_type = %d\n", hook_cbak_type);
                 }
                 
                 if (type_count > 127*127)
@@ -681,7 +685,7 @@ int cleaner (
                 {
                     leb_out(hook_cbak_type, &o);
                     if (DEBUG)
-                        printf("Writing cbak [idx=%d]\n", func_cbak);
+                        printf("Writing cbak [idx=%d, type=%d]\n", func_cbak, hook_cbak_type);
                 }
                 ADVANCE(section_len);
 
