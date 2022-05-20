@@ -153,8 +153,16 @@ int cleaner (
         types[x].set = 0;
     }
 
+    uint8_t* next_section_start = 0;
+
     while (w < wend)
     {
+        if (next_section_start && w != next_section_start)
+        {
+            return fprintf(stderr, "Internal sanity check failed. w = %ld, next_section_start = %ld\n",
+                    w - wstart, next_section_start - wstart);
+        }
+
         REQUIRE(1);
         uint8_t section_type = w[0];
         ADVANCE(1);
@@ -166,6 +174,8 @@ int cleaner (
                 section_type, section_len, w - wstart);
 
         REQUIRE(section_len);
+
+        next_section_start = w + section_len;
 
         switch (section_type)
         {
@@ -247,15 +257,42 @@ int cleaner (
                     uint8_t import_type = w[0];
                     ADVANCE(1);
 
-                    uint64_t import_idx = LEB();
-
-                    if (import_type == 0x00)
+                    // only function imports
+                    if (import_type != 0x00U)
                     {
-                        if (DEBUG)
-                            printf("Import %d type %ld\n",
-                                func_upto, import_idx);
+                        if (import_type == 0x01U)
+                        {
+                            // table type
+                            REQUIRE(1);
+                            ADVANCE(1);
+                            int dualLimit = (*w == 0x00U);
+                            ADVANCE(1);
+                            LEB();
+                            if (dualLimit)
+                                LEB();
+                        }
+                        else if (import_type == 0x02U)
+                        {
+                            // mem type
+                            int dualLimit = (*w == 0x00U);
+                            LEB();
+                            if (dualLimit)
+                                LEB();
+                        }
+                        else if (import_type == 0x03U)
+                        {
+                            REQUIRE(2);
+                            ADVANCE(2);
+                        }
+                    }
+                    else
+                    {
+                        uint64_t import_idx = LEB();
                         func_type[func_upto++] = import_idx;
                         out_import_size += (w - import_start);
+                        if (DEBUG)
+                            printf("Import %d type %ld out_import_size = %ld\n",
+                                func_upto, import_idx, out_import_size);
                     }
                 }
 
@@ -382,8 +419,17 @@ int cleaner (
     int type_new[MAX_TYPES];
     memset(type_new, 0, sizeof(type_new));
 
+    next_section_start = 0;
+
     while (w < wend)
     {
+
+        if (next_section_start && w != next_section_start)
+        {
+            return fprintf(stderr, "Internal sanity check failed. w = %ld, next_section_start = %ld\n",
+                    w - wstart, next_section_start - wstart);
+        }
+
         REQUIRE(1);
         uint8_t section_type = w[0];
         ADVANCE(1);
@@ -391,10 +437,12 @@ int cleaner (
         uint64_t section_len = LEB();
 
         if (DEBUG)
-            printf("Section type: %d, Section len: %ld, Section offset: 0x%lX\n",
+            printf("Source section type: %d, Section len: %ld, Section offset: 0x%lX\n",
                 section_type, section_len, w - wstart);
 
         REQUIRE(section_len);
+
+        next_section_start = w + section_len;
 
         switch (section_type)
         {
@@ -462,7 +510,7 @@ int cleaner (
                 section_size += (type_count > 127 ? 2U : 1U);
 
                 if (DEBUG)
-                    printf("type section_size: %d\n", section_size);
+                    printf("Writing type section, proposed size: %d\n", section_size);
                 // write out section size
                 leb_out(section_size, &o);
 
@@ -512,14 +560,22 @@ int cleaner (
                 }
 
                 if (DEBUG)
-                    printf("Actual len: %ld\n", o - out_start);
+                    printf("Actually written type section size: %ld\n", o - out_start);
                 continue;
             }
 
             case 0x02U: // imports
             {
-                *o++ = 0x02U;    
+                *o++ = 0x02U;   
+
+                if (DEBUG)
+                {
+                   printf("Writing import section, proposed size, count: %ld, %d\n",
+                           out_import_size, out_import_count);
+                }
+
                 leb_out(out_import_size, &o);
+                uint8_t* import_start = o;
                 leb_out(out_import_count, &o);
 
                 int type_count = 0;
@@ -541,7 +597,36 @@ int cleaner (
 
                     // only function imports
                     if (*w != 0x00U)
+                    {
+                        int it = *w;
+                        ADVANCE(1);
+
+                        if (it == 0x01U)
+                        {
+                            // table type
+                            REQUIRE(1);
+                            ADVANCE(1);
+                            int dualLimit = (*w == 0x00U);
+                            ADVANCE(1);
+                            LEB();
+                            if (dualLimit)
+                                LEB();
+                        }
+                        else if (it == 0x02U)
+                        {
+                            // mem type
+                            int dualLimit = (*w == 0x00U);
+                            LEB();
+                            if (dualLimit)
+                                LEB();
+                        }
+                        else if (it == 0x03U)
+                        {
+                            REQUIRE(2);
+                            ADVANCE(2);
+                        }
                         continue;
+                    }
 
                     ADVANCE(1);
 
@@ -568,23 +653,40 @@ int cleaner (
                     // advance to next entry
                 }
 
+                if (DEBUG)
+                    printf("Actually written import size: %ld\n", o - import_start);
+
                 continue;
             }
 
             case 0x03U: // functions
             {
                 *o++ = 0x03U;
+                
+
                 ssize_t s = (func_cbak == -1 ? 0x01U : 0x02U);
                 if (hook_cbak_type > 127U*127U)
                     return fprintf(stderr, "Illegally large hook_cbak type index\n");
                 if (hook_cbak_type > 127U)
                     s <<= 1U;   // double size if > 127
                 s++;            // one byte for the vector size
+                if (DEBUG)
+                    printf("Writing function section, proposed size: %ld\n", s);
+
                 leb_out(s, &o); // sections size
+                uint8_t* function_start = o;
                 *o++ = (func_cbak == -1 ? 0x01U : 0x02U);   // vector size
                 leb_out(hook_cbak_type, &o);    // vector entries
-                leb_out(hook_cbak_type, &o);
+                if (func_cbak != -1)
+                {
+                    leb_out(hook_cbak_type, &o);
+                    if (DEBUG)
+                        printf("Writing cbak [idx=%d]\n", func_cbak);
+                }
                 ADVANCE(section_len);
+
+                if (DEBUG)
+                    printf("Actually written function size: %ld\n", o - function_start);
                 continue;
             }
 
@@ -728,7 +830,7 @@ int run(char* fnin, char* fnout)
                     fnin, upto, finlen);
     }
 
-    printf("read bytes: %ld out of %ld\n", upto, finlen);
+    printf("Read source bytes: %ld out of %ld\n", upto, finlen);
 
     // done with fin
     close(fin);
@@ -759,7 +861,7 @@ int run(char* fnin, char* fnout)
             }
         }
 
-        printf("wrote bytes: %ld out of %ld\n", upto, len);
+        printf("Wrote output bytes: %ld out of %ld\n", upto, len);
     }
         
     // close output file
