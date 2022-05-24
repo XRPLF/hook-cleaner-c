@@ -400,6 +400,10 @@ int cleaner (
 
     }
 
+
+    if (hook_cbak_type == -1)
+        return fprintf(stderr, "Hook/cbak has the wrong function signature. Must be int64_t (*) (uint32_t).\n");
+
     printf("hook idx: %d, cbak idx: %d\n", func_hook, func_cbak);
 
     // reset to top

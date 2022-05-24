@@ -20,5 +20,5 @@ make
 
 ## Use
 ```bash
-./cleaner accept.wasm
+./hook-cleaner accept.wasm
 ```
