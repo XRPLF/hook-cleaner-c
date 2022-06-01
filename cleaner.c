@@ -56,6 +56,8 @@ void leb_out(
     } while (i != 0);
 }
 
+
+
 int cleaner (
     uint8_t*    w,      // web assembly input buffer
     uint8_t*    o,      // web assembly output buffer
@@ -72,10 +74,11 @@ int cleaner (
         if (wlen - (w - wstart) < need)\
             return \
                 fprintf(stderr,\
-                    "Truncated web assembly input. SrcLine: %d. Illegally short at position %ld.\n"\
+                    "Truncated web assembly input. SrcLine: %d. Illegally short at position %ld [0x%lx].\n"\
                     "wlen: %ld w-wstart: %ld need:%ld\n"\
                     "%08lX : %02X %02X %02X %02X\n",\
                     __LINE__,\
+                    ((uint64_t)(w - wstart)),\
                     ((uint64_t)(w - wstart)),\
                     ((uint64_t)(wlen)),\
                     ((uint64_t)(w-wstart)),\
@@ -153,6 +156,7 @@ int cleaner (
         types[x].set = 0;
     }
 
+    int guard_func_idx = -1;
     uint8_t* next_section_start = 0;
 
     while (w < wend)
@@ -251,7 +255,13 @@ int cleaner (
                     // import name
                     int name_length = LEB();
                     REQUIRE(name_length);
+                    if (name_length == 2 && w[0] == '_' && w[1] == 'g')
+                    {
+                        guard_func_idx = func_upto;
+                        printf("Guard function found at index: %d\n", guard_func_idx);
+                    }
                     ADVANCE(name_length);
+
 
                     REQUIRE(1);
                     uint8_t import_type = w[0];
@@ -260,6 +270,9 @@ int cleaner (
                     // only function imports
                     if (import_type != 0x00U)
                     {
+                        if (guard_func_idx == i)
+                            return fprintf(stderr, "Guard import _g was not imported as a function!\n");
+
                         if (import_type == 0x01U)
                         {
                             // table type
@@ -405,6 +418,10 @@ int cleaner (
         return fprintf(stderr, "Hook/cbak has the wrong function signature. Must be int64_t (*) (uint32_t).\n");
 
     printf("hook idx: %d, cbak idx: %d\n", func_hook, func_cbak);
+
+
+    if (guard_func_idx == -1)
+        return fprintf(stderr, "Guard function _g was not imported / missing.\n");
 
     // reset to top
     w = wstart;
@@ -770,12 +787,347 @@ int cleaner (
                 {
                     uint8_t* code_start = w;
                     uint64_t code_size = LEB();
-                    ADVANCE(code_size);
                     if (i == (func_hook - out_import_count) || i == (func_cbak - out_import_count))
                     {
-                        memcpy(o, code_start, w-code_start);
-                        o += (w-code_start);
+
+                        leb_out(code_size, &o);
+                        //memcpy(o, code_start, w-code_start);
+
+                        // parse locals
+                        uint8_t* locals_start = w;
+                        uint64_t locals_count = LEB();
+                        printf("Locals count: %ld\n", locals_count);
+                        for (int i = 0; i < locals_count; ++i)
+                        {
+                            LEB();      // inner len
+                            REQUIRE(1); // local type
+                            ADVANCE(1);
+                        }
+
+                        memcpy(o, locals_start, w-locals_start);
+                        o += (w-locals_start);
+
+                        uint8_t* expr_start = w;
+                        uint64_t expr_size = code_size - (w-locals_start);
+
+                        printf("Expr start: %ld [0x%lx]\n", expr_size, expr_size);
+
+                        // parse code
+                        uint8_t* last_loop = 0;         // where the start of the last loop instruction is in the input
+                        uint8_t* last_loop_out = 0;     // where the start of the last loop instruction is in the output
+
+                        int i32_found = 0;
+                        int call_guard_found = 0;
+                        uint8_t* last_i32 = 0;
+                        uint8_t* second_last_i32 = 0;
+
+
+                        while (w - expr_start < expr_size)
+                        {
+                            uint8_t* instr_start = w;
+
+                            REQUIRE(1);
+                            uint8_t ins = *w;
+                            ADVANCE(1);
+
+                            REQUIRE(1);
+                            // end of func instruction
+                            //if (ins == 0x0B && w - expr_start < expr_size)
+                            //    return fprintf(stderr, "Invalid end of code expression at %ld [0x%lx]\n", w-wstart, 
+                            //            w-wstart);
+
+
+                            if (ins == 0x02U || ins == 0x03U || ins == 0x04U) // block, loop, if
+                            {
+                                REQUIRE(1);
+                                if (*w != 0x40U)
+                                    return fprintf(stderr, "Could not parse block, expected 0x40 at %ld [0x%lx]\n",
+                                            w-wstart, w-wstart);
+
+                                ADVANCE(1);
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                
+                                if (ins == 0x03U)
+                                {
+                                    last_loop = w;
+                                    last_loop_out = o;
+                                }
+                                continue;
+                            }
+                            
+                            if (ins == 0x1AU)                       // drop
+                            {
+                                *o++ = ins;
+                                if (i32_found >= 2 && call_guard_found && last_loop)
+                                {
+                                    ssize_t guard_len = w - second_last_i32;
+                                    ssize_t rest_len = second_last_i32 - last_loop;
+                                    printf("Found guard at: %ld [0x%lx] - %ld [0x%lx], "
+                                            "moving to %ld [0x%lx] - %ld [0x%lx]\n", 
+                                            second_last_i32 - wstart,
+                                            second_last_i32 - wstart,
+                                            w - wstart,
+                                            w - wstart,
+                                            last_loop - wstart,
+                                            last_loop - wstart,
+                                            last_loop - wstart + guard_len,
+                                            last_loop - wstart + guard_len
+                                        );
+
+                                    // first move the instructions down
+                                    memcpy(last_loop_out + guard_len, last_loop, rest_len);
+
+                                    // then copy the guard into position
+                                    memcpy(last_loop_out, second_last_i32, guard_len);
+
+                                    // prevent moving a second guard here if somehow there is one
+                                    last_loop = 0;
+                                }
+
+                                call_guard_found = 0;
+                                last_i32 = 0;
+                                second_last_i32 = 0;
+                                i32_found = 0;
+                                continue;
+                            } else
+                            if (ins == 0x10U)                       // call
+                            {
+                                uint64_t f = LEB();
+                                if (f != guard_func_idx)
+                                {
+                                    call_guard_found = 0;
+                                    last_i32 = 0;
+                                    second_last_i32 = 0;
+                                    i32_found = 0;
+                                }
+                                else
+                                    call_guard_found = 1;
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            } else                            
+                            if (ins == 0x41U)                       // i32.const
+                            {
+                                second_last_i32 = last_i32;
+                                last_i32 = w - 1;
+
+                                uint64_t c = LEB();
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                i32_found++;
+                                continue;
+                            }
+                            else
+                            {
+                                call_guard_found = 0;
+                                last_i32 = 0;
+                                second_last_i32 = 0;
+                                i32_found = 0;
+                            }
+
+
+                            if (ins == 0x11U)                       // call_indirect
+                            {
+                                uint64_t vc = LEB();
+                                for (int i = 0; i < vc; ++i)
+                                {
+                                    LEB();
+                                }
+
+                                LEB();
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+
+                            }
+
+                            // single byte instructions
+                            if (ins == 0xD1U ||                     // is null
+                                ins == 0x1BU ||                     // select
+                                (ins >= 0x45U && ins <= 0xC4U) ||   // numeric single byte
+                                ins == 0x0FU ||                     // return
+                                ins == 0x00U ||                     // unreachable
+                                ins == 0x01U ||                     // nop
+                                ins == 0x05U ||                     // else
+                                ins == 0x0BU)                       // end block
+                            {
+                                *o++ = ins;
+                                continue;
+                            }
+                            
+                            // single LEB instructions
+                            if (ins == 0xD0U ||                     // ref.null
+                                ins == 0xD2U ||                     // ref.func
+                                (ins >= 0x20U && ins <= 0x24U) ||   // variable instructions
+                                (ins == 0x25U || ins == 0x26U) ||   // table.get table.set
+                                ins == 0x25U ||                     // table.get
+                                ins == 0x26U ||                     // table.set
+                                ins == 0x42U ||                     // i64.const
+                                ins == 0xFCU ||                     // saturating instructions
+                                ins == 0x0CU ||                     // br 
+                                ins == 0x0DU)                       // br if
+                            {
+                                LEB();
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            }
+
+                            // double LEB instructions
+                            if (ins == 0x11U)                       // call_indirect
+                            {
+                                LEB(); LEB();
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            }
+
+                            // vector of single byte types
+                            if (ins == 0x1CU)                       // select t* 
+                            {
+                                uint64_t vec_count = LEB();
+                                REQUIRE(vec_count);
+                                ADVANCE(vec_count);
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            }
+
+
+                            // double byte instructions
+                            if (ins == 0x3FU || ins == 0x40U)       // memory size, grow
+                            {
+                                REQUIRE(1);
+                                ADVANCE(1);
+                                *o++ = ins;
+                                *o++ = 0x00U;
+                                continue;
+                            }
+
+                            // f32 single float instructions
+                            if (ins == 0x43U)                       // f32.const
+                            {
+                                REQUIRE(4);
+                                ADVANCE(4);
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            }
+                            
+                            // f64 single float instructions
+                            if (ins == 0x44U)                       // f64.const
+                            {
+                                REQUIRE(8);
+                                ADVANCE(8);
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            }
+
+                            // 0xFC instructions
+                            if (ins == 0xFCU)
+                            {
+                                uint64_t t = LEB();
+                                switch(t)
+                                {
+                                    case 8:                         // mem.init
+                                    {
+                                        LEB();
+                                        REQUIRE(1);
+                                        ADVANCE(1);
+                                        break;
+                                    }
+                                    case 9:                         // data.drop
+                                    {
+                                        LEB();                  
+                                        break;
+                                    }
+                                    case 10:                        // mem.copy
+                                    {
+                                        LEB();
+                                        REQUIRE(2);
+                                        ADVANCE(2);
+                                        break;
+                                    }
+                                    case 11:                        // mem.fill
+                                    {
+                                        REQUIRE(1);
+                                        ADVANCE(1);
+                                        break;
+                                    }
+                                    default:
+                                    {
+                                        if (!(t >= 0 && t <= 7))
+                                        return fprintf(stderr,
+                                                "While processing 0xFC instr unknown type at: %ld\n",
+                                                w-wstart);
+                                    }
+                                }
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            }
+
+                            // single memargs
+                            if (ins >= 0x28U && ins <= 0x3EU)
+                            {
+                                LEB(); LEB();
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            }
+
+
+                            // vector instructions 
+                            if (ins == 0xFDU)
+                            {
+                                uint64_t t = LEB(); 
+
+                                // single memarg
+                                if ((t >= 0 && t <= 11) ||
+                                    (t == 92 || t == 93))
+                                {
+                                    LEB(); LEB();
+                                }
+                                else
+                                // single memarg followed by a single byte
+                                if (t >= 84 && t <= 91)
+                                {
+                                    LEB(); LEB(); 
+                                    REQUIRE(1);
+                                    ADVANCE(1);
+                                }
+                                else
+                                // 16 byte arg
+                                if (t == 12 || t == 13)
+                                {
+                                    REQUIRE(16);
+                                    ADVANCE(16);
+                                }
+                                else
+                                // single byte
+                                if (t >= 21 && t <= 34)
+                                {
+                                    REQUIRE(1);
+                                    ADVANCE(1);
+                                }
+                                else 
+                                {
+                                    // 0 byte instruction, do nothing
+                                }
+                                memcpy(o, instr_start, w-instr_start);
+                                o += (w - instr_start);
+                                continue;
+                            }
+
+                        }
+                        
+
+                        //o += (w-code_start);
                     }
+                    else
+                        ADVANCE(code_size);     // skip other functions
                 }
                 continue;
             }
@@ -793,6 +1145,7 @@ int cleaner (
     *len = (o - ostart);
     return 0; 
 }
+
 
 int run(char* fnin, char* fnout)
 {
