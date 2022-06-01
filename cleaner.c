@@ -927,7 +927,7 @@ int cleaner (
                             }
 
 
-                            if (ins == 0x11U)                       // call_indirect
+                            if (ins == 0x0EU)                       // br table
                             {
                                 uint64_t vc = LEB();
                                 for (int i = 0; i < vc; ++i)
@@ -941,6 +941,7 @@ int cleaner (
                                 continue;
 
                             }
+
 
                             // single byte instructions
                             if (ins == 0xD1U ||                     // is null
