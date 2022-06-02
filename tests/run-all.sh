@@ -1,10 +1,12 @@
-stat ../cleaner > /dev/null 2> /dev/null
+HOOKCLEANER=../hook-cleaner
+
+stat $HOOKCLEANER > /dev/null 2> /dev/null
 if [ ! "$?" -eq "0" ];
 then
     pushd ..
     make
     popd
-    stat ../cleaner > /dev/null 2> /dev/null
+    stat $HOOKCLEANER > /dev/null 2> /dev/null
     if [ ! "$?" -eq "0" ];
     then
         echo "Hook cleaner not found in parent directory, build attempt failed."
@@ -25,7 +27,7 @@ TOTALSAVED=0
 for i in `ls *.wasm`; do
     COUNT=`expr $COUNT + 1`
     rm /tmp/t.wasm
-    ../cleaner $i /tmp/t.wasm > /dev/null 2> /dev/null
+    $HOOKCLEANER $i /tmp/t.wasm > /dev/null 2> /dev/null
     R1="$?"
     wasm2wat /tmp/t.wasm > /dev/null 2> /dev/null
     R2="$?"
