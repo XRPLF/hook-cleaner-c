@@ -14,7 +14,8 @@
 
 uint64_t leb(
     uint8_t** buf,
-    uint8_t* bufend)
+    uint8_t* bufend,
+    int is_signed)
 {
     uint64_t val = 0, shift = 0, i = 0;
     while (*buf + i < bufend)
@@ -35,6 +36,10 @@ uint64_t leb(
             continue;
         }
         *buf += i;
+
+        if (is_signed && shift < 64 && (b & 0x40U))
+            val |= (~0 << shift);
+
         return val;
     }
     return 0;
@@ -101,10 +106,14 @@ int cleaner (
 
     
     #define LEB()\
-        (tmp2=w-wstart,tmp=leb(&w, wend),\
+        (tmp2=w-wstart,tmp=leb(&w, wend, 0),\
         (DEBUG && DEBUG_VERBOSE &&\
         printf("Leb read at 0x%lX: %ld\n", tmp2, tmp)),tmp)
 
+    #define SIGNED_LEB()\
+        (tmp2=w-wstart,tmp=leb(&w, wend, 1),\
+        (DEBUG && DEBUG_VERBOSE &&\
+        printf("Signed Leb read at 0x%lX: %ld\n", tmp2, tmp)),tmp)
 
     uint8_t*    wstart = w;  // remember start of buffer
     ssize_t     wlen = *len;
@@ -840,11 +849,17 @@ int cleaner (
                             if (ins == 0x02U || ins == 0x03U || ins == 0x04U) // block, loop, if
                             {
                                 REQUIRE(1);
-                                if (*w != 0x40U)
-                                    return fprintf(stderr, "Could not parse block, expected 0x40 at %ld [0x%lx]\n",
-                                            w-wstart, w-wstart);
+                                uint8_t block_type = *w;
+                                if ((block_type >= 0x7CU && block_type <= 0x7FU) ||
+                                     block_type == 0x7BU || block_type == 0x70U || 
+                                     block_type == 0x7BU || block_type == 0x40U)
+                                {
+                                    ADVANCE(1);
+                                }
+                                else
+                                    SIGNED_LEB();
 
-                                ADVANCE(1);
+
                                 memcpy(o, instr_start, w-instr_start);
                                 o += (w - instr_start);
                                 
