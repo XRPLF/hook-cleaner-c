@@ -62,6 +62,29 @@ void leb_out(
 }
 
 
+void leb_out_pad(
+    uint64_t i,
+    uint8_t** o,
+    int padto)
+{
+    printf("Leb_out_pad(i=%ld, pad=%d): [", i, padto);
+    padto--;
+    do
+    {
+        uint8_t b = i & 0x7FU;
+        i >>= 7U;
+        if (i != 0 || padto > 0)
+            b |= 0x80;
+
+        **o = b;
+        (*o)++;
+        printf(" 0x%02X", b);
+        padto--;
+    } while (i > 0 || padto >= 0);
+
+
+    printf(" ]\n");
+}
 
 int cleaner (
     uint8_t*    w,      // web assembly input buffer
@@ -787,7 +810,20 @@ int cleaner (
                 if (DEBUG)
                     printf("Output code size: %ld\n", out_code_size + 1);
 
-                leb_out(out_code_size + 1 /* allow for vec len */, &o);
+    
+                // RH NOTE:
+                // In addition to moving a properly formed clean guard of the form { i32.const, i32.const, _g, drop }
+                // we can also reinterpret a badly formed guard like { i32.con, i32.store, ..., i32.con, _g, drop }.
+                // This becomes what's known as a guard rewrite. In this case additional instructions beyond the
+                // original size of the hook will be inserted at the start of the relevant loop. This counter tracks
+                // these, and the reserved space allows us to output the right LEB128 at the end.
+                int total_guard_rewrite_bytes = 0;
+                uint8_t* codesec_out_size_ptr = o;
+
+
+
+                // we need to correct this at the end
+                leb_out_pad(out_code_size + 1 /* allow for vec len */, &o, 3);
 
                 *o++ = (func_cbak == -1 ? 0x01U : 0x02U); // vec len
 
@@ -799,7 +835,21 @@ int cleaner (
                     if (i == (func_hook - out_import_count) || i == (func_cbak - out_import_count))
                     {
 
-                        leb_out(code_size, &o);
+                        //leb_out(code_size, &o);
+                        int guard_rewrite_bytes = 0;
+                        uint8_t* code_size_ptr = o;
+
+                        // we need to correct this at the end
+                        leb_out_pad(code_size, &o, 3);
+                        
+                        int pad_len = 3 - (w-code_start);
+                        if (pad_len < 0)
+                            return fprintf(stderr, 
+                                    "Codesec %ld was too large! Size must fit in 3 leb128 bytes!\n", i);
+
+                        total_guard_rewrite_bytes += pad_len;
+
+
                         //memcpy(o, code_start, w-code_start);
 
                         // parse locals
@@ -826,9 +876,23 @@ int cleaner (
                         uint8_t* last_loop_out = 0;     // where the start of the last loop instruction is in the output
 
                         int i32_found = 0;
-                        int call_guard_found = 0;
+                        uint8_t* call_guard_found = 0;
                         uint8_t* last_i32 = 0;
+                        uint64_t last_i32_actual = 0;   // the actual leb value 
                         uint8_t* second_last_i32 = 0;
+                        uint64_t second_last_i32_actual = 0; // the actual leb value
+                        int between_const_and_guard = 0;
+
+                        #define RESET_GUARD_FINDER()\
+                        {\
+                            i32_found = 0;\
+                            call_guard_found = 0;\
+                            last_i32 = 0;\
+                            last_i32_actual = 0;\
+                            second_last_i32 = 0;\
+                            second_last_i32_actual = 0;\
+                            between_const_and_guard = 0;\
+                        }
 
 
                         while (w - expr_start < expr_size)
@@ -840,11 +904,6 @@ int cleaner (
                             ADVANCE(1);
 
                             REQUIRE(1);
-                            // end of func instruction
-                            //if (ins == 0x0B && w - expr_start < expr_size)
-                            //    return fprintf(stderr, "Invalid end of code expression at %ld [0x%lx]\n", w-wstart, 
-                            //            w-wstart);
-
 
                             if (ins == 0x02U || ins == 0x03U || ins == 0x04U) // block, loop, if
                             {
@@ -863,11 +922,13 @@ int cleaner (
                                 memcpy(o, instr_start, w-instr_start);
                                 o += (w - instr_start);
                                 
-                                if (ins == 0x03U)
+                                if (ins == 0x03U)                   // loop
                                 {
                                     last_loop = w;
                                     last_loop_out = o;
                                 }
+                                
+                                RESET_GUARD_FINDER();    
                                 continue;
                             }
                             
@@ -876,48 +937,116 @@ int cleaner (
                                 *o++ = ins;
                                 if (i32_found >= 2 && call_guard_found && last_loop)
                                 {
-                                    ssize_t guard_len = w - second_last_i32;
-                                    ssize_t rest_len = second_last_i32 - last_loop;
-                                    printf("Found guard at: %ld [0x%lx] - %ld [0x%lx], "
-                                            "moving to %ld [0x%lx] - %ld [0x%lx]\n", 
-                                            second_last_i32 - wstart,
-                                            second_last_i32 - wstart,
-                                            w - wstart,
-                                            w - wstart,
-                                            last_loop - wstart,
-                                            last_loop - wstart,
-                                            last_loop - wstart + guard_len,
-                                            last_loop - wstart + guard_len
-                                        );
 
-                                    // first move the instructions down
-                                    memcpy(last_loop_out + guard_len, last_loop, rest_len);
+                                    if (between_const_and_guard > 0)
+                                    {
 
-                                    // then copy the guard into position
-                                    memcpy(last_loop_out, second_last_i32, guard_len);
+                                        if (second_last_i32_actual < last_i32_actual)
+                                        {
+                                            uint64_t swap = last_i32_actual;
+                                            last_i32_actual = second_last_i32_actual;
+                                            second_last_i32_actual = swap;
+                                        }
 
-                                    // prevent moving a second guard here if somehow there is one
-                                    last_loop = 0;
+                                        uint8_t guard_code[128];
+                                        uint8_t* g = guard_code;
+                                        *g++ = 0x41U;
+                                        leb_out(second_last_i32_actual, &g);
+                                        *g++ = 0x41U;
+                                        leb_out(last_i32_actual, &g);
+                                        *g++ = 0x10U;
+                                        leb_out(guard_func_idx, &g);
+                                        *g++ = 0x1AU;
+
+                                        ssize_t guard_len = g - guard_code;
+                                        ssize_t rest_len = w - last_loop;
+
+                                        char guard_print[128]; guard_print[0] = '\0';
+                                        snprintf(guard_print, 128, "_g(0x%08lx,%ld)", second_last_i32_actual,
+                                                last_i32_actual);
+                                        int guard_pad_len = 20 - strlen(guard_print);
+                                        if (guard_pad_len < 0) guard_pad_len = 0;
+
+                                        snprintf(guard_print, 128, "_g(0x%08lx,%.*s%ld)",
+                                                second_last_i32_actual,
+                                                guard_pad_len,
+                                                "                     ",
+                                                last_i32_actual);
+
+
+                                        printf("Found dirty guard %s\tat: %ld [0x%lx] - %ld [0x%lx],\t"
+                                                "rewriting to %ld [0x%lx] - %ld [0x%lx]\n", 
+                                                guard_print,
+                                                second_last_i32 - wstart,
+                                                second_last_i32 - wstart,
+                                                w - wstart,
+                                                w - wstart,
+                                                last_loop - wstart,
+                                                last_loop - wstart,
+                                                last_loop - wstart + guard_len,
+                                                last_loop - wstart + guard_len
+                                            );
+
+                                        // erase guard call with nops and an additional drop
+                                        // to preserve the stack at this location during runtime
+                                        int bytes_to_fill = w - call_guard_found - 2;
+                                        *call_guard_found = 0x1AU;                      // drop
+                                        while (bytes_to_fill-- > 0)
+                                            *(++call_guard_found) = 0x01U;              // nop
+
+                                        // first move the instructions down
+                                        memcpy(last_loop_out + guard_len, last_loop, rest_len);
+
+                                        // then copy the guard into position
+                                        memcpy(last_loop_out, guard_code, guard_len);
+
+                                        // prevent moving a second guard here if somehow there is one
+                                        last_loop = 0;
+
+                                        RESET_GUARD_FINDER();
+
+                                        guard_rewrite_bytes += guard_len;
+                                        total_guard_rewrite_bytes += guard_len;
+                                        o += guard_len;
+                                    }
+                                    else
+                                    {
+                                        ssize_t guard_len = w - second_last_i32;
+                                        ssize_t rest_len = second_last_i32 - last_loop;
+                                        printf("Found clean guard at: %ld [0x%lx] - %ld [0x%lx], "
+                                                "moving to %ld [0x%lx] - %ld [0x%lx]\n", 
+                                                second_last_i32 - wstart,
+                                                second_last_i32 - wstart,
+                                                w - wstart,
+                                                w - wstart,
+                                                last_loop - wstart,
+                                                last_loop - wstart,
+                                                last_loop - wstart + guard_len,
+                                                last_loop - wstart + guard_len
+                                            );
+
+                                        // first move the instructions down
+                                        memcpy(last_loop_out + guard_len, last_loop, rest_len);
+
+                                        // then copy the guard into position
+                                        memcpy(last_loop_out, second_last_i32, guard_len);
+
+                                        // prevent moving a second guard here if somehow there is one
+                                        last_loop = 0;
+                                    }
                                 }
 
-                                call_guard_found = 0;
-                                last_i32 = 0;
-                                second_last_i32 = 0;
-                                i32_found = 0;
+                                RESET_GUARD_FINDER();
                                 continue;
                             } else
                             if (ins == 0x10U)                       // call
                             {
+                                uint8_t* ptr = w - 1;
                                 uint64_t f = LEB();
                                 if (f != guard_func_idx)
-                                {
-                                    call_guard_found = 0;
-                                    last_i32 = 0;
-                                    second_last_i32 = 0;
-                                    i32_found = 0;
-                                }
+                                    RESET_GUARD_FINDER()
                                 else
-                                    call_guard_found = 1;
+                                    call_guard_found = ptr;
                                 memcpy(o, instr_start, w-instr_start);
                                 o += (w - instr_start);
                                 continue;
@@ -927,19 +1056,17 @@ int cleaner (
                                 second_last_i32 = last_i32;
                                 last_i32 = w - 1;
 
-                                uint64_t c = LEB();
+                                second_last_i32_actual = last_i32_actual;
+
+                                last_i32_actual = LEB();
+
                                 memcpy(o, instr_start, w-instr_start);
                                 o += (w - instr_start);
                                 i32_found++;
                                 continue;
-                            }
-                            else
-                            {
-                                call_guard_found = 0;
-                                last_i32 = 0;
-                                second_last_i32 = 0;
-                                i32_found = 0;
-                            }
+                            } else
+                            if (i32_found > 0)
+                                between_const_and_guard++;
 
 
                             if (ins == 0x0EU)                       // br table
@@ -1136,15 +1263,35 @@ int cleaner (
                                 o += (w - instr_start);
                                 continue;
                             }
-
                         }
-                        
+                      
+                        /*
+                            int guard_rewrite_bytes = 0;
+                            uint8_t* code_size_ptr = o;
+                        */
 
-                        //o += (w-code_start);
+                        printf("Rewriting codesec from: %ld to %ld at %ld [0x%lx]\n",
+                                code_size,
+                                code_size + guard_rewrite_bytes,
+                                code_size,
+                                code_size);
+
+                        leb_out_pad(code_size + guard_rewrite_bytes, /* 1 byte for vec len */
+                                &code_size_ptr, 3);
                     }
                     else
                         ADVANCE(code_size);     // skip other functions
                 }
+
+                // rewrite the total size of the section
+                printf("Rewriting codesec section from: %ld to %ld at %ld [0x%lx] \n",
+                        out_code_size + 1,
+                        out_code_size + 1 + total_guard_rewrite_bytes,
+                        out_code_size,
+                        out_code_size);
+
+                leb_out_pad(out_code_size + total_guard_rewrite_bytes + 1, /* 1 byte for vec len */
+                        &codesec_out_size_ptr, 3);
                 continue;
             }
 
@@ -1189,7 +1336,7 @@ int run(char* fnin, char* fnout)
     if (!inp)
         return fprintf(stderr, "Could not allocate %ld bytes\n", finlen);
 
-    uint8_t* out = (uint8_t*)malloc(finlen);
+    uint8_t* out = (uint8_t*)malloc(finlen * 2);
     if (!out)
         return fprintf(stderr, "Could not allocate %ld bytes\n", finlen);
 
