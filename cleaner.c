@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 
-#define VERSION "1.0"
+#define VERSION "1.1"
 #define DEBUG 1
 #define DEBUG_VERBOSE 0
 
@@ -67,7 +67,7 @@ void leb_out_pad(
     uint8_t** o,
     int padto)
 {
-    printf("Leb_out_pad(i=%ld, pad=%d): [", i, padto);
+    fprintf(stderr, "Leb_out_pad(i=%ld, pad=%d): [", i, padto);
     padto--;
     do
     {
@@ -78,12 +78,12 @@ void leb_out_pad(
 
         **o = b;
         (*o)++;
-        printf(" 0x%02X", b);
+        fprintf(stderr, " 0x%02X", b);
         padto--;
     } while (i > 0 || padto >= 0);
 
 
-    printf(" ]\n");
+    fprintf(stderr, " ]\n");
 }
 
 int cleaner (
@@ -95,7 +95,7 @@ int cleaner (
     #define REQUIRE(need)\
     {\
         if (DEBUG && DEBUG_VERBOSE)\
-            printf("Require %ld b\tfrom 0x%lX to 0x%lX\n",\
+            fprintf(stderr, "Require %ld b\tfrom 0x%lX to 0x%lX\n",\
                 ((uint64_t)(need)),\
                 ((uint64_t)(w-wstart)),\
                 ((uint64_t)(w+need-wstart)));\
@@ -119,7 +119,7 @@ int cleaner (
     #define ADVANCE(adv)\
     {\
         if (DEBUG && DEBUG_VERBOSE)\
-            printf("Advance %ld b\tfrom 0x%lX to 0x%lX\n",\
+            fprintf(stderr, "Advance %ld b\tfrom 0x%lX to 0x%lX\n",\
                 ((uint64_t)(adv)),\
                 ((uint64_t)(w-wstart)),\
                 ((uint64_t)(w+adv-wstart)));\
@@ -131,12 +131,12 @@ int cleaner (
     #define LEB()\
         (tmp2=w-wstart,tmp=leb(&w, wend, 0),\
         (DEBUG && DEBUG_VERBOSE &&\
-        printf("Leb read at 0x%lX: %ld\n", tmp2, tmp)),tmp)
+        fprintf(stderr, "Leb read at 0x%lX: %ld\n", tmp2, tmp)),tmp)
 
     #define SIGNED_LEB()\
         (tmp2=w-wstart,tmp=leb(&w, wend, 1),\
         (DEBUG && DEBUG_VERBOSE &&\
-        printf("Signed Leb read at 0x%lX: %ld\n", tmp2, tmp)),tmp)
+        fprintf(stderr, "Signed Leb read at 0x%lX: %ld\n", tmp2, tmp)),tmp)
 
     uint8_t*    wstart = w;  // remember start of buffer
     ssize_t     wlen = *len;
@@ -160,7 +160,7 @@ int cleaner (
     // first section loop
 
     if (DEBUG)
-        printf("First pass start\n");
+        fprintf(stderr, "First pass start\n");
 
     int func_hook = -1;
     int func_cbak = -1;
@@ -206,7 +206,7 @@ int cleaner (
         uint64_t section_len = LEB();
 
         if (DEBUG)
-            printf("Section type: %d, Section len: %ld, Section offset: 0x%lX\n",
+            fprintf(stderr, "Section type: %d, Section len: %ld, Section offset: 0x%lX\n",
                 section_type, section_len, w - wstart);
 
         REQUIRE(section_len);
@@ -254,7 +254,7 @@ int cleaner (
                         if (result_type = 0x7EU && result_count == 1 && is_P32)
                         {
                             if (DEBUG)
-                                printf("Hook/Cbak type: %d\n", i);
+                                fprintf(stderr, "Hook/Cbak type: %d\n", i);
                             if (hook_cbak_type != -1)
                                 return fprintf(stderr, "int64_t func(int32_t) appears in type section twice!\n");
 
@@ -270,7 +270,7 @@ int cleaner (
                 // just get an import count
                 int count = LEB();
                 if (DEBUG)
-                    printf("Import count: %d\n", count);
+                    fprintf(stderr, "Import count: %d\n", count);
 
                 int func_upto = 0;
 
@@ -290,7 +290,7 @@ int cleaner (
                     if (name_length == 2 && w[0] == '_' && w[1] == 'g')
                     {
                         guard_func_idx = func_upto;
-                        printf("Guard function found at index: %d\n", guard_func_idx);
+                        fprintf(stderr, "Guard function found at index: %d\n", guard_func_idx);
                     }
                     ADVANCE(name_length);
 
@@ -336,7 +336,7 @@ int cleaner (
                         func_type[func_upto++] = import_idx;
                         out_import_size += (w - import_start);
                         if (DEBUG)
-                            printf("Import %d type %ld out_import_size = %ld\n",
+                            fprintf(stderr, "Import %d type %ld out_import_size = %ld\n",
                                 func_upto, import_idx, out_import_size);
                     }
                 }
@@ -354,12 +354,12 @@ int cleaner (
             {
                 func_count = LEB();
                 if (DEBUG)
-                    printf("Function count: %d\n", func_count);
+                    fprintf(stderr, "Function count: %d\n", func_count);
                 for (int i = 0; i < func_count; ++i)
                 {
                     func_type[out_import_count + i] = LEB();
                     if (DEBUG)
-                        printf("Func %d is type %d\n",
+                        fprintf(stderr, "Func %d is type %d\n",
                             out_import_count + i, func_type[out_import_count + i]);
                 }
                 continue;
@@ -449,7 +449,7 @@ int cleaner (
     if (hook_cbak_type == -1)
         return fprintf(stderr, "Hook/cbak has the wrong function signature. Must be int64_t (*) (uint32_t).\n");
 
-    printf("hook idx: %d, cbak idx: %d\n", func_hook, func_cbak);
+    fprintf(stderr, "hook idx: %d, cbak idx: %d\n", func_hook, func_cbak);
 
 
     if (guard_func_idx == -1)
@@ -461,7 +461,7 @@ int cleaner (
     // pass two: write out
     
     if (DEBUG)
-        printf("Second pass start\n");
+        fprintf(stderr, "Second pass start\n");
 
     uint8_t* ostart = o;
 
@@ -490,7 +490,7 @@ int cleaner (
         uint64_t section_len = LEB();
 
         if (DEBUG)
-            printf("Source section type: %d, Section len: %ld, Section offset: 0x%lX\n",
+            fprintf(stderr, "Source section type: %d, Section len: %ld, Section offset: 0x%lX\n",
                 section_type, section_len, w - wstart);
 
         REQUIRE(section_len);
@@ -547,7 +547,7 @@ int cleaner (
                             imports_use_hook_cbak_type = 1;
                             hook_cbak_type = type_count-1;
                             if (DEBUG)
-                                printf("Imports DO use hook_cbak_type = %d\n", hook_cbak_type);
+                                fprintf(stderr, "Imports DO use hook_cbak_type = %d\n", hook_cbak_type);
                         }
                     }
                 }
@@ -557,7 +557,7 @@ int cleaner (
                     hook_cbak_type = type_count++;
                     section_size += 5U;
                     if (DEBUG)
-                        printf("Imports do not use hook_cbak_type = %d\n", hook_cbak_type);
+                        fprintf(stderr, "Imports do not use hook_cbak_type = %d\n", hook_cbak_type);
                 }
                 
                 if (type_count > 127*127)
@@ -567,7 +567,7 @@ int cleaner (
                 section_size += (type_count > 127 ? 2U : 1U);
 
                 if (DEBUG)
-                    printf("Writing type section, proposed size: %d\n", section_size);
+                    fprintf(stderr, "Writing type section, proposed size: %d\n", section_size);
                 // write out section size
                 leb_out(section_size, &o);
 
@@ -617,7 +617,7 @@ int cleaner (
                 }
 
                 if (DEBUG)
-                    printf("Actually written type section size: %ld\n", o - out_start);
+                    fprintf(stderr, "Actually written type section size: %ld\n", o - out_start);
                 continue;
             }
 
@@ -627,7 +627,7 @@ int cleaner (
 
                 if (DEBUG)
                 {
-                   printf("Writing import section, proposed size, count: %ld, %d\n",
+                   fprintf(stderr, "Writing import section, proposed size, count: %ld, %d\n",
                            out_import_size, out_import_count);
                 }
 
@@ -701,7 +701,7 @@ int cleaner (
                     *o++ = 0x00U;
 
                     if (DEBUG)
-                        printf("New import: %d old type: %d new type: %d\n", i, func_type[i], type_new[func_type[i]]);
+                        fprintf(stderr, "New import: %d old type: %d new type: %d\n", i, func_type[i], type_new[func_type[i]]);
 
                     // write new type idx
                     leb_out(type_new[func_type[i]], &o);
@@ -711,7 +711,7 @@ int cleaner (
                 }
 
                 if (DEBUG)
-                    printf("Actually written import size: %ld\n", o - import_start);
+                    fprintf(stderr, "Actually written import size: %ld\n", o - import_start);
 
                 continue;
             }
@@ -728,7 +728,7 @@ int cleaner (
                     s <<= 1U;   // double size if > 127
                 s++;            // one byte for the vector size
                 if (DEBUG)
-                    printf("Writing function section, proposed size: %ld\n", s);
+                    fprintf(stderr, "Writing function section, proposed size: %ld\n", s);
 
                 leb_out(s, &o); // sections size
                 uint8_t* function_start = o;
@@ -738,12 +738,12 @@ int cleaner (
                 {
                     leb_out(hook_cbak_type, &o);
                     if (DEBUG)
-                        printf("Writing cbak [idx=%d, type=%d]\n", func_cbak, hook_cbak_type);
+                        fprintf(stderr, "Writing cbak [idx=%d, type=%d]\n", func_cbak, hook_cbak_type);
                 }
                 ADVANCE(section_len);
 
                 if (DEBUG)
-                    printf("Actually written function size: %ld\n", o - function_start);
+                    fprintf(stderr, "Actually written function size: %ld\n", o - function_start);
                 continue;
             }
 
@@ -808,7 +808,7 @@ int cleaner (
                 *o++ = 0x0AU;
 
                 if (DEBUG)
-                    printf("Output code size: %ld\n", out_code_size + 1);
+                    fprintf(stderr, "Output code size: %ld\n", out_code_size + 1);
 
     
                 // RH NOTE:
@@ -855,7 +855,7 @@ int cleaner (
                         // parse locals
                         uint8_t* locals_start = w;
                         uint64_t locals_count = LEB();
-                        printf("Locals count: %ld\n", locals_count);
+                        fprintf(stderr, "Locals count: %ld\n", locals_count);
                         for (int i = 0; i < locals_count; ++i)
                         {
                             LEB();      // inner len
@@ -869,7 +869,7 @@ int cleaner (
                         uint8_t* expr_start = w;
                         uint64_t expr_size = code_size - (w-locals_start);
 
-                        printf("Expr start: %ld [0x%lx]\n", expr_size, expr_size);
+                        fprintf(stderr, "Expr start: %ld [0x%lx]\n", expr_size, expr_size);
 
                         // parse code
                         uint8_t* last_loop = 0;         // where the start of the last loop instruction is in the input
@@ -974,7 +974,7 @@ int cleaner (
                                                 last_i32_actual);
 
 
-                                        printf("Found dirty guard %s\tat: %ld [0x%lx] - %ld [0x%lx],\t"
+                                        fprintf(stderr, "Found dirty guard %s\tat: %ld [0x%lx] - %ld [0x%lx],\t"
                                                 "rewriting to %ld [0x%lx] - %ld [0x%lx]\n", 
                                                 guard_print,
                                                 second_last_i32 - wstart,
@@ -1013,7 +1013,7 @@ int cleaner (
                                     {
                                         ssize_t guard_len = w - second_last_i32;
                                         ssize_t rest_len = second_last_i32 - last_loop;
-                                        printf("Found clean guard at: %ld [0x%lx] - %ld [0x%lx], "
+                                        fprintf(stderr, "Found clean guard at: %ld [0x%lx] - %ld [0x%lx], "
                                                 "moving to %ld [0x%lx] - %ld [0x%lx]\n", 
                                                 second_last_i32 - wstart,
                                                 second_last_i32 - wstart,
@@ -1270,7 +1270,7 @@ int cleaner (
                             uint8_t* code_size_ptr = o;
                         */
 
-                        printf("Rewriting codesec from: %ld to %ld at %ld [0x%lx]\n",
+                        fprintf(stderr, "Rewriting codesec from: %ld to %ld at %ld [0x%lx]\n",
                                 code_size,
                                 code_size + guard_rewrite_bytes,
                                 code_size,
@@ -1284,7 +1284,7 @@ int cleaner (
                 }
 
                 // rewrite the total size of the section
-                printf("Rewriting codesec section from: %ld to %ld at %ld [0x%lx] \n",
+                fprintf(stderr, "Rewriting codesec section from: %ld to %ld at %ld [0x%lx] \n",
                         out_code_size + 1,
                         out_code_size + 1 + total_guard_rewrite_bytes,
                         out_code_size,
@@ -1322,47 +1322,65 @@ int run(char* fnin, char* fnout)
     if (fnout == 0)
         fnout = fnin;
 
-    // open wasm file
-    int fin = open(fnin, O_RDONLY);
-    if (fin < 0)
-        return fprintf(stderr, "Could not open file `%s` for reading\n", fnin);
+    int fin = 0;
+    off_t finlen = 0x100000U;
 
-    // get its length
-    off_t finlen = lseek(fin, 0L, SEEK_END);
-    lseek(fin, 0L, SEEK_SET);
+    if (strcmp(fnin, "-") != 0 && strcmp(fnin, "/dev/stdin") != 0)
+    {
+        // open wasm file
+        fin = open(fnin, O_RDONLY);
+        if (fin < 0)
+            return fprintf(stderr, "Could not open file `%s` for reading\n", fnin);
+
+        // get its length
+        finlen = lseek(fin, 0L, SEEK_END);
+        lseek(fin, 0L, SEEK_SET);
+    }
+
 
     // create a buffer
     uint8_t* inp = (uint8_t*)malloc(finlen);
     if (!inp)
         return fprintf(stderr, "Could not allocate %ld bytes\n", finlen);
+    
+    // read file into buffer
+    ssize_t upto = 0;
+    while (upto < finlen)
+    {
+        ssize_t bytes_read = read(fin, inp + upto, fin == 0 ? 1 : (finlen - upto));
+        upto += bytes_read;
+
+        if (bytes_read < 0 || (fin != 0 && bytes_read == 0 && upto < finlen))
+            return
+                fprintf(stderr,
+                    "Could not read all of file `%s`, only read %ld out of %ld bytes.\n",
+                    fnin, upto, finlen);
+        if (bytes_read == 0)
+        {
+            finlen = upto;
+            break;
+        }
+    }
+
+    fprintf(stderr, "Read source bytes: %ld out of %ld\n", upto, finlen);
+
 
     uint8_t* out = (uint8_t*)malloc(finlen * 2);
     if (!out)
         return fprintf(stderr, "Could not allocate %ld bytes\n", finlen);
 
-    // read file into buffer
-    ssize_t upto = 0;
-    while (upto < finlen)
-    {
-        ssize_t bytes_read = read(fin, inp + upto, finlen - upto);
-        upto += bytes_read;
-
-        if (bytes_read < 0 || (bytes_read == 0 && upto < finlen))
-            return
-                fprintf(stderr,
-                    "Could not read all of file `%s`, only read %ld out of %ld bytes.\n",
-                    fnin, upto, finlen);
-    }
-
-    printf("Read source bytes: %ld out of %ld\n", upto, finlen);
-
     // done with fin
     close(fin);
 
-    // open output file
-    int fout = open(fnout, O_TRUNC | O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
-    if (fout < 0)
-        return fprintf(stderr, "Could not open file `%s` for writing\n", fnout);
+    int fout = 1;
+
+    if (strcmp(fnout, "-") != 0 && strcmp(fnout, "/dev/stdout") != 0)
+    {
+        // open output file
+        fout = open(fnout, O_TRUNC | O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+        if (fout < 0)
+            return fprintf(stderr, "Could not open file `%s` for writing\n", fnout);
+    }
 
     // run cleaner
     ssize_t len = finlen;
@@ -1378,14 +1396,14 @@ int run(char* fnin, char* fnout)
             upto += bytes_written;
             if (bytes_written < 0 || (bytes_written == 0 && upto < len))
             {
-                retval =fprintf(stderr,
+                retval =
+                    fprintf(stderr,
                     "Could not write all of output file `%s`, only wrote %ld out of %ld bytes. Check disk space.\n",
                     fnout, upto, len);
                 break;
             }
         }
-
-        printf("Wrote output bytes: %ld out of %ld\n", upto, len);
+        fprintf(stderr, "Wrote output bytes: %ld out of %ld\n", upto, len);
     }
         
     // close output file
@@ -1406,7 +1424,8 @@ int print_help(int argc, char** argv)
             "Usage: %s in.wasm [out.wasm]\n"
             "Notes: If out.wasm is omitted then in.wasm is replaced.\n"
             "       Strips all functions and exports except cbak() and hook().\n"
-            "       Also strips custom sections.\n", argv[0]);
+            "       Also strips custom sections.\n"
+            "       Specify - for stdin/out.\n", argv[0]);
     return 1;
 }
 
