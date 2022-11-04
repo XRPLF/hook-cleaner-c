@@ -251,7 +251,7 @@ int cleaner (
                         int result_type = LEB();
                         types[i].r[j] = result_type;
 
-                        if (result_type = 0x7EU && result_count == 1 && is_P32)
+                        if (result_type == 0x7EU && result_count == 1 && is_P32)
                         {
                             if (DEBUG)
                                 fprintf(stderr, "Hook/Cbak type: %d\n", i);
