@@ -903,8 +903,6 @@ int cleaner (
                             uint8_t ins = *w;
                             ADVANCE(1);
 
-                            REQUIRE(1);
-
                             if (ins == 0x02U || ins == 0x03U || ins == 0x04U) // block, loop, if
                             {
                                 REQUIRE(1);
@@ -934,6 +932,7 @@ int cleaner (
                             
                             if (ins == 0x1AU)                       // drop
                             {
+                                REQUIRE(1);
                                 *o++ = ins;
                                 if (i32_found >= 2 && call_guard_found && last_loop)
                                 {
@@ -1041,6 +1040,7 @@ int cleaner (
                             } else
                             if (ins == 0x10U)                       // call
                             {
+                                REQUIRE(1);
                                 uint8_t* ptr = w - 1;
                                 uint64_t f = LEB();
                                 if (f != guard_func_idx)
@@ -1053,6 +1053,7 @@ int cleaner (
                             } else                            
                             if (ins == 0x41U)                       // i32.const
                             {
+                                REQUIRE(1);
                                 second_last_i32 = last_i32;
                                 last_i32 = w - 1;
 
@@ -1071,6 +1072,7 @@ int cleaner (
 
                             if (ins == 0x0EU)                       // br table
                             {
+                                REQUIRE(1);
                                 uint64_t vc = LEB();
                                 for (int i = 0; i < vc; ++i)
                                 {
@@ -1111,6 +1113,7 @@ int cleaner (
                                 ins == 0x0CU ||                     // br 
                                 ins == 0x0DU)                       // br if
                             {
+                                REQUIRE(1);
                                 LEB();
                                 memcpy(o, instr_start, w-instr_start);
                                 o += (w - instr_start);
@@ -1120,7 +1123,10 @@ int cleaner (
                             // double LEB instructions
                             if (ins == 0x11U)                       // call_indirect
                             {
-                                LEB(); LEB();
+                                REQUIRE(1);
+                                LEB();
+                                REQUIRE(1);
+                                LEB();
                                 memcpy(o, instr_start, w-instr_start);
                                 o += (w - instr_start);
                                 continue;
@@ -1129,6 +1135,7 @@ int cleaner (
                             // vector of single byte types
                             if (ins == 0x1CU)                       // select t* 
                             {
+                                REQUIRE(1);
                                 uint64_t vec_count = LEB();
                                 REQUIRE(vec_count);
                                 ADVANCE(vec_count);
@@ -1171,6 +1178,7 @@ int cleaner (
                             // 0xFC instructions
                             if (ins == 0xFCU)
                             {
+                                REQUIRE(1);
                                 uint64_t t = LEB();
                                 switch(t)
                                 {
@@ -1215,7 +1223,10 @@ int cleaner (
                             // single memargs
                             if (ins >= 0x28U && ins <= 0x3EU)
                             {
-                                LEB(); LEB();
+                                REQUIRE(1);
+                                LEB();
+                                REQUIRE(1);
+                                LEB();
                                 memcpy(o, instr_start, w-instr_start);
                                 o += (w - instr_start);
                                 continue;
@@ -1225,6 +1236,7 @@ int cleaner (
                             // vector instructions 
                             if (ins == 0xFDU)
                             {
+                                REQUIRE(1);
                                 uint64_t t = LEB(); 
 
                                 // single memarg
